@@ -1,0 +1,19 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-background: #fafbfc;
+    --color-foreground: #1e293b;
+    --color-border: #e2e8f0;
+    --color-primary: #0055fffd;
+    --color-primary-foreground: #ffffff;
+    --color-secondary: #00b2ff;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: Inter, system-ui, Arial, sans-serif;
+  }
+}
