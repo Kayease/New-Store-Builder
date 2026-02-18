@@ -19,8 +19,9 @@ API_URL = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:8000/api/v1")
 
 
 # Create uploads directory - outside 'fastapi-backend' folder to prevent uvicorn reloads
+# Determine project root safely (one level up from fastapi-backend)
 # __file__ is app/api/v1/endpoints/platform_themes.py
-# parents: 0=file, 1=endpoints, 2=v1, 3=api, 4=app, 5=fastapi-backend
+# parents: 0=endpoints, 1=v1, 2=api, 3=app, 4=fastapi-backend
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 UPLOAD_DIR = PROJECT_ROOT / "uploads" / "themes"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -410,13 +411,13 @@ export const API_URL = (typeof window !== 'undefined' && (window.location.port =
     ? `${window.location.origin}/api/v1`
     : 'http://127.0.0.1:8000/api/v1';
 
-export async function getStoreData(slug: string) {
+export async function getLiveStore(slug: string) {
     const res = await fetch(`${API_URL}/s/live/${slug}`);
     return await res.json();
 }
 
 export async function registerCustomer(slug: string, name: string, email: string, pass: string) {
-    const storeRes = await getStoreData(slug);
+    const storeRes = await getLiveStore(slug);
     const storeId = storeRes.data?.store?.id;
     if (!storeId) throw new Error("Store Invalid");
     const res = await fetch(`${API_URL}/store/customers/register`, {
@@ -427,7 +428,7 @@ export async function registerCustomer(slug: string, name: string, email: string
 }
 
 export async function loginCustomer(slug: string, email: string, pass: string) {
-    const storeRes = await getStoreData(slug);
+    const storeRes = await getLiveStore(slug);
     const storeId = storeRes.data?.store?.id;
     if (!storeId) throw new Error("Store Invalid");
     const res = await fetch(`${API_URL}/store/customers/login`, {
@@ -481,7 +482,10 @@ export async function loginCustomer(slug: string, email: string, pass: string) {
             localStorage.setItem(`customer_token_${storeId}`, res.token);
             localStorage.setItem(`customer_data_${storeId}`, JSON.stringify(res.customer));
             alert("Success!");
-            window.location.href = `../?store=${slug}`;
+            // Smooth redirect using relative path to keep store context
+            const params = new URLSearchParams(window.location.search);
+            const redirectParams = params.toString() ? `?${params.toString()}` : '';
+            window.location.href = `../${redirectParams}`;
         } else {
             setError(res.detail || "Authentication failed");
             alert(res.detail || "Authentication failed");
@@ -499,15 +503,17 @@ export async function loginCustomer(slug: string, email: string, pass: string) {
 
         # Inject Imports
         if 'import { useState' not in content:
-            content = content.replace('"use client";\n', '"use client";\nimport { useState } from "react";\n')
-            if 'import { useState' not in content: # Fallback if replace failed
+            if '"use client";\n' in content:
+                content = content.replace('"use client";\n', '"use client";\nimport { useState } from "react";\n')
+            else:
                 content = "import { useState } from 'react';\n" + content
         
         # Define the import line
         api_import_code = "import { " + ('registerCustomer' if is_signup else 'loginCustomer') + ", API_URL } from '../../lib/api';\n"
         
-        content = content.replace('"use client";\n', '"use client";\n' + api_import_code)
-        if "API_URL" not in content: # Fallback
+        if '"use client";\n' in content:
+            content = content.replace('"use client";\n', '"use client";\n' + api_import_code)
+        else:
             content = api_import_code + content
         
         # Inject Logic into Component
@@ -528,16 +534,16 @@ export async function loginCustomer(slug: string, email: string, pass: string) {
 
         # 2. Email Input
         content = re.sub(r'<input\b([^>]*?)type=["\']email["\']([^>]*?)/?>', 
-                        lambda m: patch_input(m, f'value={{email}} onChange={{(e) => setEmail(e.target.value)}} required'), content)
+                        lambda m: patch_input(m, f'value={{email}} onChange={{(e) => setEmail(e.target.value)}} required'), content, flags=re.IGNORECASE)
         
         # 3. Password Input
         content = re.sub(r'<input\b([^>]*?)type=["\']password["\']([^>]*?)/?>', 
-                        lambda m: patch_input(m, f'value={{password}} onChange={{(e) => setPassword(e.target.value)}} required'), content)
+                        lambda m: patch_input(m, f'value={{password}} onChange={{(e) => setPassword(e.target.value)}} required'), content, flags=re.IGNORECASE)
         
         # 4. Name Input (only if signup)
         if is_signup:
             content = re.sub(r'<input\b([^>]*?)placeholder=["\'][^"\']*(name|Name|User)[^"\']*["\']([^>]*?)/?>', 
-                            lambda m: patch_input(m, f'value={{name}} onChange={{(e) => setName(e.target.value)}} required'), content)
+                            lambda m: patch_input(m, f'value={{name}} onChange={{(e) => setName(e.target.value)}} required'), content, flags=re.IGNORECASE)
 
         file_path.write_text(content, encoding='utf-8')
         return True
@@ -566,11 +572,21 @@ export async function loginCustomer(slug: string, email: string, pass: string) {
         identity_code = """
 "use client";
 import { useEffect } from 'react';
+import { getLiveStore } from '../lib/api';
+
 export default function KXIdentity() {
     useEffect(() => {
         if (typeof window !== 'undefined') {
             const s = new URLSearchParams(window.location.search).get('store');
-            if (s) sessionStorage.setItem('kx_sticky_store', s);
+            if (s) {
+                sessionStorage.setItem('kx_sticky_store', s);
+                // Pre-fetch store data to warm cache
+                getLiveStore(s).then(data => {
+                    if (data.success) {
+                        console.log("🏪 Universal Data Sync: Active for", data.data?.store?.name);
+                    }
+                });
+            }
         }
     }, []);
     return null;
@@ -604,8 +620,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     content = content.replace("{children}", "<KXIdentity />{children}")
                     layout_file.write_text(content, encoding='utf-8')
                     print(f"🧬 Patched existing Layout with Identity for {theme_slug}")
-
-    # next.config.js fix
 
     # next.config.js fix
     base_path_val = f"/uploads/themes/{theme_slug}/out"

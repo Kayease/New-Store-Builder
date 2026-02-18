@@ -56,18 +56,29 @@ export default function MerchantStoreThemesPage() {
             const themesRes = await PublicThemes.list();
             const storeRes = await StoreAPI.getBySlug(storeSlug);
 
-            if (themesRes?.data) setThemes(themesRes.data);
+            // Handle both { items: [] } and { data: [] } formats
+            if (themesRes?.items) {
+                setThemes(themesRes.items);
+            } else if (themesRes?.data) {
+                setThemes(themesRes.data);
+            } else if (Array.isArray(themesRes)) {
+                setThemes(themesRes);
+            }
 
             if (storeRes?.data) {
-                if (storeRes.data.themeId) {
-                    setActiveThemeId(storeRes.data.themeId);
+                // Check both themeId and theme_id for fallback
+                const activeId = storeRes.data.themeId || storeRes.data.config?.theme_id;
+                if (activeId) {
+                    setActiveThemeId(activeId);
                 }
 
                 if (storeRes.data.planId) {
                     const { PublicSubscriptionPlans } = await import("../../../../lib/api");
                     try {
                         const plansRes = await PublicSubscriptionPlans.list();
-                        const plan = plansRes?.data?.find((p: any) => p.id === storeRes.data.planId);
+                        // Handle plans format similarly
+                        const plans = plansRes?.items || plansRes?.data || (Array.isArray(plansRes) ? plansRes : []);
+                        const plan = plans.find((p: any) => p.id === storeRes.data.planId);
                         setCurrentPlan(plan);
                     } catch (e) {
                         console.warn("Failed to fetch plan details", e);
@@ -96,45 +107,48 @@ export default function MerchantStoreThemesPage() {
 
     const handleSelectTheme = async (themeSlug: string, themeId: string) => {
         if (themeId === activeThemeId) return;
+
+        // 1. Optimistic Update (Instant feedback)
+        const previousId = activeThemeId;
+        setActiveThemeId(themeId);
         setUpdating(themeId);
+
         try {
-            const res = await PublicThemes.apply(storeSlug, themeSlug);
-
-            if (res.status === "processing") {
-                // Keep 'updating' active to show AI loader
-                toast.info("AI Activation Started! Optimizing your theme...");
-
-                // Polling to wait for build
-                let attempts = 0;
-                const interval = setInterval(async () => {
-                    attempts++;
-                    const check = await StoreAPI.getBySlug(storeSlug);
-                    if (check.data?.themeId === themeId) {
-                        // Success!
-                        setActiveThemeId(themeId);
-                        setUpdating(null);
-                        clearInterval(interval);
-                        toast.success(
-                            <div>
-                                <strong>AI Activation Complete!</strong><br />
-                                <span className="text-sm">Universal Auth injected & built. <a href={`/s/${storeSlug}/live`} target="_blank" className="underline font-bold">View Live Store →</a></span>
-                            </div>
-                        );
-                    }
-                    if (attempts > 30) {
-                        setUpdating(null);
-                        clearInterval(interval);
-                    }
-                }, 3000);
-            } else {
-                setActiveThemeId(themeId);
-                setUpdating(null);
-                toast.success("Theme applied!");
-            }
-        } catch (err) {
-            console.error("Failed to update theme:", err);
-            toast.error("Failed to update theme");
+            await PublicThemes.apply(storeSlug, themeSlug);
+            toast.success("Theme applied!");
             setUpdating(null);
+
+            // Silent polling for build completion in the background
+            let attempts = 0;
+            const interval = setInterval(async () => {
+                attempts++;
+                try {
+                    const check = await StoreAPI.getBySlug(storeSlug);
+                    if (check.data?.themeId === themeId || check.data?.config?.theme_id === themeId) {
+                        clearInterval(interval);
+                        console.log("Confirmed: Theme live in database.");
+                    }
+                } catch (e) { }
+                if (attempts > 60) clearInterval(interval);
+            }, 10000);
+
+        } catch (err: any) {
+            // 2. Silent Recovery check (Network flicker check)
+            try {
+                const verify = await StoreAPI.getBySlug(storeSlug);
+                const currentId = verify.data?.themeId || verify.data?.config?.theme_id;
+                if (currentId === themeId || currentId === themeSlug) {
+                    toast.success("Theme applied!");
+                    setUpdating(null);
+                    return;
+                }
+            } catch (vErr) { }
+
+            // 3. Real Fail: Revert
+            console.error("Theme switch failed:", err);
+            setActiveThemeId(previousId);
+            setUpdating(null);
+            toast.error("Theme selection interrupted. Please check your internet.");
         }
     };
 
@@ -191,7 +205,11 @@ export default function MerchantStoreThemesPage() {
 
             <Grid container spacing={4}>
                 {themes.map((theme) => {
-                    const isActive = theme.id === activeThemeId || theme._id === activeThemeId;
+                    // Check ID match OR Slug match as a robust fallback
+                    const isActive =
+                        (theme.id && (theme.id === activeThemeId || theme._id === activeThemeId)) ||
+                        (theme.slug && theme.slug === activeThemeId);
+
                     const isProcessing = updating === theme.id || updating === theme._id;
                     const isLocked = isThemeLocked(theme);
 
