@@ -94,17 +94,22 @@ export default function MerchantThemesPage() {
         return false;
     };
 
-    const handleSelectTheme = async (themeId: string) => {
+    const handleSelectTheme = async (theme: ThemeItem) => {
+        const themeId = theme.id || theme._id;
         if (themeId === activeThemeId) return;
 
         setUpdating(themeId);
         try {
-            await StoreAPI.update(storeSlug, { themeId });
+            // Using the specialized apply endpoint which triggers AI theme activation
+            await PublicThemes.apply(storeSlug, theme.slug);
             setActiveThemeId(themeId);
-            toast.success("Theme updated successfully!");
+            toast.success("Theme update initiated! AI processing is running in the background.");
+
+            // Refresh data to show processing status if applicable
+            setTimeout(() => loadData(), 2000);
         } catch (err) {
             console.error("Failed to update theme:", err);
-            toast.error("Failed to update theme");
+            toast.error("Failed to update theme. Please try again.");
         } finally {
             setUpdating(null);
         }
@@ -274,7 +279,7 @@ export default function MerchantThemesPage() {
                                                 variant="contained"
                                                 color={isLocked ? "inherit" : "primary"}
                                                 disabled={isProcessing || isLocked}
-                                                onClick={() => handleSelectTheme(theme.id || theme._id)}
+                                                onClick={() => handleSelectTheme(theme)}
                                                 sx={{ borderRadius: 2, fontWeight: "bold", textTransform: "none" }}
                                             >
                                                 {isProcessing ? "Applying..." : isLocked ? "Plan Restricted" : "Apply Theme"}

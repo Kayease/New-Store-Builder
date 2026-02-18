@@ -14,6 +14,10 @@ from pathlib import Path
 
 router = APIRouter()
 
+# Global defaults for AI automation
+API_URL = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:8000/api/v1")
+
+
 # Create uploads directory - outside 'fastapi-backend' folder to prevent uvicorn reloads
 # __file__ is app/api/v1/endpoints/platform_themes.py
 # parents: 0=file, 1=endpoints, 2=v1, 3=api, 4=app, 5=fastapi-backend
@@ -395,6 +399,8 @@ def inject_theme_logic(extract_dir: Path, theme_slug: str):
     lib_dir.mkdir(exist_ok=True)
     
     api_url = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:8000/api/v1")
+    global API_URL
+    API_URL = api_url
     env_content = f"NEXT_PUBLIC_API_URL={api_url}\n"
     (extract_dir / ".env.local").write_text(env_content)
     (extract_dir / ".env").write_text(env_content)
@@ -449,44 +455,47 @@ export async function loginCustomer(slug: string, email: string, pass: string) {
         
         # Step A: Injections (State & Handler)
         is_signup = mode == "signup"
+        global API_URL
         
         # Ensure 'use client' is at the very top for Next.js 13+
         if '"use client"' not in content and "'use client'" not in content:
             content = '"use client";\n' + content
 
-        logic_code = f"""
+        logic_code = """
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: any) => {{
+  const handleSubmit = async (e: any) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    try {{
+    try {
         const slug = sessionStorage.getItem('kx_sticky_store') || '';
-        const res = await { 'registerCustomer(slug, name, email, password)' if is_signup else 'loginCustomer(slug, email, password)' };
-        if (res.success) {{
-            const storeRes = await fetch(`${{API_URL}}/s/live/${{slug}}`).then(r => r.json());
+        const res = await ACTION_PLACEHOLDER;
+        if (res.success) {
+            const storeRes = await fetch(`${API_URL}/s/live/${slug}`).then(r => r.json());
             const storeId = storeRes.data?.store?.id;
-            localStorage.setItem(`customer_token_${{storeId}}`, res.token);
-            localStorage.setItem(`customer_data_${{storeId}}`, JSON.stringify(res.customer));
+            localStorage.setItem(`customer_token_${storeId}`, res.token);
+            localStorage.setItem(`customer_data_${storeId}`, JSON.stringify(res.customer));
             alert("Success!");
-            window.location.href = `../?store=${{slug}}`;
-        }} else {{
+            window.location.href = `../?store=${slug}`;
+        } else {
             setError(res.detail || "Authentication failed");
             alert(res.detail || "Authentication failed");
-        }}
-    }} catch (err: any) {{
+        }
+    } catch (err: any) {
         setError(err.message);
         alert(err.message);
-    }} finally {{
+    } finally {
         setLoading(false);
-    }}
-  }};
+    }
+  };
 """
+        action = 'registerCustomer(slug, name, email, password)' if is_signup else 'loginCustomer(slug, email, password)'
+        logic_code = logic_code.replace("ACTION_PLACEHOLDER", action)
 
         # Inject Imports
         if 'import { useState' not in content:
@@ -494,10 +503,12 @@ export async function loginCustomer(slug: string, email: string, pass: string) {
             if 'import { useState' not in content: # Fallback if replace failed
                 content = "import { useState } from 'react';\n" + content
         
-        api_import = f"import {{ { 'registerCustomer' if is_signup else 'loginCustomer' }, API_URL }} from '../../lib/api';\n"
-        content = content.replace('"use client";\n', f'"use client";\n{api_import}')
-        if API_URL not in content: # Fallback
-            content = api_import + content
+        # Define the import line
+        api_import_code = "import { " + ('registerCustomer' if is_signup else 'loginCustomer') + ", API_URL } from '../../lib/api';\n"
+        
+        content = content.replace('"use client";\n', '"use client";\n' + api_import_code)
+        if "API_URL" not in content: # Fallback
+            content = api_import_code + content
         
         # Inject Logic into Component
         # Find the start of the function body

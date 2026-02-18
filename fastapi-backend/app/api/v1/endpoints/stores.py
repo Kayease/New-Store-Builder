@@ -414,12 +414,27 @@ async def update_store(slug: str, payload: Dict[str, Any], current_user: dict = 
         updates["config"] = new_config
         
         # 3. Perform update
+        print(f"DEBUG: Updating store {store_id} with: {updates}")
         update_res = supabase_admin.table("stores").update(updates).eq("id", store_id).execute()
         
+        # In Supabase, update() returns the updated row. 
+        # If it's empty, it might mean the row was not found (unlikely here) or nothing changed.
         if not update_res.data:
-             raise HTTPException(status_code=400, detail="Update failed")
+            print(f"⚠️ Update returned no data for store {store_id}. Checking if it exists...")
+            # Verify it still exists
+            check_res = supabase_admin.table("stores").select("id").eq("id", store_id).execute()
+            if not check_res.data:
+                 raise HTTPException(status_code=404, detail="Store lost during update")
+            
+            # If it exists, it was likely a no-op or successful but returned no data
+            return {
+                "success": True,
+                "message": "Store updated (no changes detected or successfully applied)",
+                "data": payload
+            }
              
         updated_store = update_res.data[0]
+        print(f"✅ Store {store_id} updated successfully")
         
         return {
             "success": True,
@@ -432,8 +447,8 @@ async def update_store(slug: str, payload: Dict[str, Any], current_user: dict = 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error updating store: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Error updating store: {e}")
+        raise HTTPException(status_code=500, detail=f"Database Update Error: {str(e)}")
 
 @router.delete("/slug/{slug}")
 async def delete_store(slug: str, current_user: dict = Depends(verify_token)):
