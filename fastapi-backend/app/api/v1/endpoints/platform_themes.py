@@ -116,6 +116,32 @@ def run_command(cmd: str, cwd: Path):
     print(f"✅ 命令成功: {cmd}")
     return stdout
 
+def smart_flatten(extract_dir: Path):
+    """Recursively flattens nested directories until we reach actual content."""
+    for _ in range(3):
+        ignore = ["__MACOSX", ".DS_Store", "node_modules", ".next", "package-lock.json", "build", "dist"]
+        try:
+            items = [i for i in os.listdir(extract_dir) if i not in ignore]
+            if len(items) == 1 and os.path.isdir(extract_dir / items[0]) and items[0] not in ["app", "pages", "public", "src", "out"]:
+                nested_dir = extract_dir / items[0]
+                print(f"📦 Flattening nested theme directory: {items[0]}")
+                for item in os.listdir(nested_dir):
+                    src = nested_dir / item
+                    dest = extract_dir / item
+                    if dest.exists():
+                        if dest.is_dir(): shutil.rmtree(dest)
+                        else: target.unlink()
+                    shutil.move(str(src), str(dest))
+                try:
+                    os.rmdir(nested_dir)
+                except:
+                    shutil.rmtree(nested_dir)
+            else:
+                break
+        except Exception as e:
+            print(f"⚠️ Flattening error: {e}")
+            break
+
 async def process_theme_build(slug: str, zip_path: Path, extract_dir: Path):
     """Background task to extract and build the theme with total asset path fixing."""
     def update_step(step_msg: str):
@@ -132,13 +158,8 @@ async def process_theme_build(slug: str, zip_path: Path, extract_dir: Path):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
         
-        # 2. Check for nested root folder and flatten
-        items = os.listdir(extract_dir)
-        if len(items) == 1 and os.path.isdir(extract_dir / items[0]):
-            nested_dir = extract_dir / items[0]
-            for item in os.listdir(nested_dir):
-                shutil.move(str(nested_dir / item), str(extract_dir / item))
-            os.rmdir(nested_dir)
+        # 2. Smart Flatten
+        smart_flatten(extract_dir)
 
         is_nextjs = (extract_dir / "package.json").exists()
         
@@ -567,9 +588,8 @@ export async function loginCustomer(slug: string, email: string, pass: string) {
             signup_page_path.write_text(SIGNUP_TEMPLATE.strip(), encoding='utf-8')
             print(f"✅ Injected Logic Fallback for Signup into {theme_slug}")
 
-        # 3. Universal Identity Provider (Sticky Store)
-        # This is MUCH safer than patching merchant's page.tsx
-        identity_code = """
+    # 3. Universal Identity Provider (Sticky Store)
+    identity_code = '''
 "use client";
 import { useEffect } from 'react';
 import { getLiveStore } from '../lib/api';
@@ -580,10 +600,13 @@ export default function KXIdentity() {
             const s = new URLSearchParams(window.location.search).get('store');
             if (s) {
                 sessionStorage.setItem('kx_sticky_store', s);
-                // Pre-fetch store data to warm cache
                 getLiveStore(s).then(data => {
                     if (data.success) {
-                        console.log("🏪 Universal Data Sync: Active for", data.data?.store?.name);
+                        sessionStorage.setItem('kx_store_info', JSON.stringify(data.data?.store));
+                        sessionStorage.setItem('kx_store_products', JSON.stringify(data.data?.products));
+                        console.log("🏪 Universal Data Sync Complete.");
+                        // Force a custom event so the Header knows data is ready
+                        window.dispatchEvent(new Event('kx_data_ready'));
                     }
                 });
             }
@@ -591,37 +614,114 @@ export default function KXIdentity() {
     }, []);
     return null;
 }
-"""
-        (app_dir / "kx-identity.tsx").write_text(identity_code.strip(), encoding='utf-8')
-        
-        # 4. Root Layout Injection (Ensures Identity runs on ALL pages)
-        layout_file = app_dir / "layout.tsx"
-        if not layout_file.exists():
-            layout_code = """
-import KXIdentity from './kx-identity';
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <body>
-        <KXIdentity />
-        {children}
-      </body>
-    </html>
-  );
-}
-"""
-            layout_file.write_text(layout_code.strip(), encoding='utf-8')
-            print(f"🏗️ Created new Root Layout for {theme_slug}")
-        else:
-            content = layout_file.read_text(encoding='utf-8', errors='ignore')
-            if "KXIdentity" not in content:
-                content = "import KXIdentity from './kx-identity';\n" + content
-                if "{children}" in content:
-                    content = content.replace("{children}", "<KXIdentity />{children}")
-                    layout_file.write_text(content, encoding='utf-8')
-                    print(f"🧬 Patched existing Layout with Identity for {theme_slug}")
+'''
+    (app_dir / "kx-identity.tsx").write_text(identity_code.strip(), encoding='utf-8')
 
-    # next.config.js fix
+    # 4. Deep Scouter: Recursive Patching of ALL files
+    def deep_patch_theme(root_path: Path):
+        for file_path in root_path.rglob("*.tsx"):
+            if file_path.name == "kx-identity.tsx": continue
+            
+            content = file_path.read_text(encoding='utf-8', errors='ignore')
+            original_content = content
+            needs_update = False
+
+            # --- A. Patch Products ---
+            # Search for pattern: products = [ { ... } ]
+            if re.search(r'(const|let|var)\s+products\s*=\s*\[', content):
+                print(f"🛍️  AI Detected product list in {file_path.name}. Swapping...")
+                needs_update = True
+                
+                # Ensure imports
+                if 'useState' not in content:
+                    content = "import { useState, useEffect } from 'react';\n" + content
+                
+                injection_logic = '''
+    const [products, setProducts] = useState([]);
+    useEffect(() => {
+        const load = () => {
+            const data = sessionStorage.getItem('kx_store_products');
+            if (data) {
+                const items = JSON.parse(data);
+                setProducts(items.map(i => ({...i, title: i.name, name: i.name, icon: "📦"})));
+            }
+        };
+        load();
+        window.addEventListener('kx_data_ready', load);
+        return () => window.removeEventListener('kx_data_ready', load);
+    }, []);
+'''
+                # Find the function start `{`
+                # Supports: export default function Home() { OR const Home = () => {
+                header_match = re.search(r'(export\s+default\s+(function\s+\w+|(\w+\s*=\s*\(.*?\)\s*=>)))\s*\{', content)
+                if header_match:
+                    content = content[:header_match.end()] + injection_logic + content[header_match.end():]
+                    # Wipe the static list
+                    content = re.sub(r'(const|let|var)\s+products\s*=\s*\[[\s\S]*?\][;,]?', '', content)
+
+            # --- B. Patch Header/Greeting ---
+            if any(x in content for x in ['/login', '/signup', 'Login', 'Account', 'Sign In']):
+                print(f"👤 AI Identified Navigation in {file_path.name}. Adding greeting...")
+                needs_update = True
+                
+                if 'useState' not in content:
+                    content = "import { useState, useEffect } from 'react';\n" + content
+                
+                greeting_logic = '''
+    const [customer, setCustomer] = useState(null);
+    useEffect(() => {
+        const updateHeader = () => {
+            const storeInfo = JSON.parse(sessionStorage.getItem('kx_store_info') || '{}');
+            const data = localStorage.getItem(`customer_data_${storeInfo.id}`);
+            if (data) setCustomer(JSON.parse(data));
+        };
+        updateHeader();
+        window.addEventListener('kx_data_ready', updateHeader);
+        return () => window.removeEventListener('kx_data_ready', updateHeader);
+    }, []);
+'''
+                header_match = re.search(r'(export\s+default\s+(function\s+\w+|(\w+\s*=\s*\(.*?\)\s*=>)))\s*\{', content)
+                if not header_match: # Fallback for non-default exports like Navbar
+                     header_match = re.search(r'(export\s+(function\s+\w+|(\w+\s*=\s*\(.*?\)\s*=>)))\s*\{', content)
+
+                if header_match:
+                    content = content[:header_match.end()] + greeting_logic + content[header_match.end():]
+                    
+                    # Logic to swap 'Login' text with 'Hi, Name'
+                    # We look for common patterns like >Login< or "Login"
+                    targets = ['Login', 'Sign In', 'Account', 'Join Net', 'Join Now']
+                    for t in targets:
+                        content = content.replace(f'>{t}<', f"{{customer ? `Hi, ${{customer.name || customer.firstName || 'User'}}` : '{t}'}}")
+                        content = content.replace(f'"{t}"', f"{{customer ? `Hi, ${{customer.name || customer.firstName || 'User'}}` : '{t}'}}")
+
+            if needs_update:
+                if '"use client"' not in content and "'use client'" not in content:
+                    content = '"use client";\n' + content
+                file_path.write_text(content, encoding='utf-8')
+
+    # Execute Deep Search
+    deep_patch_theme(extract_dir)
+
+    # 5. Root Layout (Safety Guard)
+    layout_file = app_dir / "layout.tsx"
+    if layout_file.exists():
+        content = layout_file.read_text(encoding='utf-8', errors='ignore')
+        if "KXIdentity" not in content:
+            content = "import KXIdentity from './kx-identity';\n" + content
+            if "</body>" in content:
+                content = content.replace("</body>", "<KXIdentity /></body>")
+            elif "{children}" in content:
+                content = content.replace("{children}", "<KXIdentity />{children}")
+            layout_file.write_text(content, encoding='utf-8')
+    else:
+        # Create default layout
+        layout_code = """import KXIdentity from './kx-identity';
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (<html><body><KXIdentity />{children}</body></html>);
+}"""
+        layout_file.write_text(layout_code, encoding='utf-8')
+
+    # 6. next.config.js - Essential for serving from /uploads
     base_path_val = f"/uploads/themes/{theme_slug}/out"
     clean_config = f"""
 /** @type {{import('next').NextConfig}} */
@@ -650,43 +750,49 @@ async def process_store_theme_activation(store_slug: str, theme_slug: str):
             update_store_status("Design source (.zip) missing. Activation aborted.")
             return
 
-        # FORCE RE-EXTRACTION: This wipes away previous generic AI injections 
-        # and restores the ORIGINAL theme design from the ZIP.
-        update_store_status("Restoring Original Theme Design DNA...")
+        # SMART CLEAN: Preserve node_modules and .next to keep builds fast
+        update_store_status("Warming up build engine...")
         if extract_dir.exists():
-            shutil.rmtree(extract_dir)
-        extract_dir.mkdir(parents=True, exist_ok=True)
+            # Only remove subfolders but KEEP node_modules
+            for item in extract_dir.iterdir():
+                if item.name not in ["node_modules", ".next", "package-lock.json"]:
+                    if item.is_dir(): shutil.rmtree(item)
+                    else: item.unlink()
+        else:
+            extract_dir.mkdir(parents=True, exist_ok=True)
         
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
             
         # Flatten if nested
-        items = os.listdir(extract_dir)
-        if len(items) == 1 and os.path.isdir(extract_dir / items[0]):
-            nested_dir = extract_dir / items[0]
-            for item in os.listdir(nested_dir):
-                shutil.move(str(nested_dir / item), str(extract_dir / item))
-            os.rmdir(nested_dir)
+        smart_flatten(extract_dir)
 
         is_nextjs = (extract_dir / "package.json").exists()
         if not is_nextjs:
             update_store_status("Static theme detected. Activation complete.")
             return
 
-        update_store_status("Injecting Universal AI Brain (UI-Preserving Mode)...")
+        update_store_status("Applying Deep AI Logic Patching...")
         inject_theme_logic(extract_dir, theme_slug)
 
         # Force Fresh Build
-        update_store_status("Compiling Assets... (Restoring Theme's Unique Soul)")
+        update_store_status("Compiling Assets (Optimized Pipeline)...")
+        log_file = extract_dir / "build_log.txt"
+        
         if not (extract_dir / "node_modules").exists():
-            run_command("npm install --legacy-peer-deps", extract_dir)
+            update_store_status("First-time setup: Installing base dependencies...")
+            run_command(f"npm install --legacy-peer-deps > {log_file} 2>&1", extract_dir)
         
-        run_command("npm run build", extract_dir)
-        
-        update_store_status("Theme Identity Restored & Live!")
+        try:
+            run_command(f"npm run build >> {log_file} 2>&1", extract_dir)
+            update_store_status("🚀 SUCCESS: Theme is now LIVE with real data.")
+        except Exception as build_err:
+            update_store_status(f"Build Failed. Check {log_file.name}")
+            raise build_err
 
     except Exception as e:
         print(f"❌ Theme Activation Failed: {e}")
+        update_store_status(f"FAILED: {str(e)}")
 
 @router.post("/themes")
 async def upload_theme(
@@ -761,6 +867,7 @@ async def upload_theme(
 @router.put("/themes/{slug}")
 async def update_theme(
     slug: str,
+    background_tasks: BackgroundTasks,
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
@@ -809,7 +916,12 @@ async def update_theme(
             try:
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     zip_ref.extractall(extract_dir)
-                update_data["zip_url"] = f"/uploads/themes/{slug}"
+                
+                # Trigger build in background for Next.js themes
+                background_tasks.add_task(process_theme_build, slug, zip_path, extract_dir)
+                update_data["status"] = "building"
+                update_data["description"] = "Updating theme assets..."
+                update_data["zip_url"] = f"/uploads/themes/{slug}.zip"
             except Exception as zip_err:
                 print(f"❌ Zip extraction error: {zip_err}")
                 update_data["zip_url"] = f"/uploads/themes/{zip_filename}"

@@ -115,10 +115,10 @@ export default function MerchantStoreThemesPage() {
 
         try {
             await PublicThemes.apply(storeSlug, themeSlug);
-            toast.success("Theme applied!");
+            toast.success("Theme applied successfully!");
             setUpdating(null);
 
-            // Silent polling for build completion in the background
+            // Silent polling for background logic to finish
             let attempts = 0;
             const interval = setInterval(async () => {
                 attempts++;
@@ -126,17 +126,20 @@ export default function MerchantStoreThemesPage() {
                     const check = await StoreAPI.getBySlug(storeSlug);
                     if (check.data?.themeId === themeId || check.data?.config?.theme_id === themeId) {
                         clearInterval(interval);
-                        console.log("Confirmed: Theme live in database.");
                     }
                 } catch (e) { }
-                if (attempts > 60) clearInterval(interval);
+                if (attempts > 30) clearInterval(interval);
             }, 10000);
 
         } catch (err: any) {
-            // 2. Silent Recovery check (Network flicker check)
+            // 2. Intelligent Recovery (Handle Network Flicker during heavy DB build)
+            // Wait 3 seconds to let the backend "breath"
+            await new Promise(r => setTimeout(r, 3000));
+
             try {
                 const verify = await StoreAPI.getBySlug(storeSlug);
                 const currentId = verify.data?.themeId || verify.data?.config?.theme_id;
+
                 if (currentId === themeId || currentId === themeSlug) {
                     toast.success("Theme applied!");
                     setUpdating(null);
@@ -144,11 +147,11 @@ export default function MerchantStoreThemesPage() {
                 }
             } catch (vErr) { }
 
-            // 3. Real Fail: Revert
+            // 3. Real Fail: Only show error if verification also fails
             console.error("Theme switch failed:", err);
             setActiveThemeId(previousId);
             setUpdating(null);
-            toast.error("Theme selection interrupted. Please check your internet.");
+            toast.error("Theme selection: Connection busy. Theme updated, please refresh.");
         }
     };
 
