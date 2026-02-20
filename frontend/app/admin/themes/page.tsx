@@ -22,8 +22,10 @@ import {
   DialogActions,
   MenuItem,
   CircularProgress,
+  LinearProgress,
   Snackbar,
   Alert,
+  Box,
 } from "@mui/material";
 import Icon from "../../../components/AppIcon";
 import { PlatformThemes } from "../../../lib/api";
@@ -57,6 +59,7 @@ export default function Page() {
   const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null);
   const [buildZip, setBuildZip] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [themes, setThemes] = useState<ThemeItem[]>([]);
   const [query, setQuery] = useState("");
   const [newOpen, setNewOpen] = useState(false);
@@ -73,6 +76,12 @@ export default function Page() {
     message: string;
     severity: "success" | "error" | "info" | "warning";
   }>({ open: false, message: "", severity: "success" });
+
+  // Real-time Build Logging
+  const [logOpen, setLogOpen] = useState(false);
+  const [activeLogSlug, setActiveLogSlug] = useState<string | null>(null);
+  const [buildLogs, setBuildLogs] = useState("");
+  const [isLogPolling, setIsLogPolling] = useState(false);
 
   const getThumbnailUrl = (url?: string) => {
     if (!url) return null;
@@ -92,8 +101,13 @@ export default function Page() {
   const slug = useMemo(() => slugify(name), [name]);
 
   const load = async () => {
-    const res = await PlatformThemes.list();
-    if (res?.items) setThemes(res.items);
+    try {
+      const res = await PlatformThemes.list();
+      if (res?.items) setThemes(res.items);
+    } catch (err) {
+      console.error("Failed to load themes:", err);
+      showSnackbar("Failed to load themes. The server may be busy.", "error");
+    }
   };
 
   useEffect(() => {
@@ -124,23 +138,61 @@ export default function Page() {
     return () => URL.revokeObjectURL(url);
   }, [editThumbnail]);
 
+  // Log Polling Logic
+  useEffect(() => {
+    let interval: any;
+    if (logOpen && activeLogSlug) {
+      const fetchLogs = async () => {
+        try {
+          const res = await PlatformThemes.getLogs(activeLogSlug);
+          if (res?.logs) setBuildLogs(res.logs);
+        } catch (err) {
+          console.error("Log fetch error:", err);
+        }
+      };
+
+      fetchLogs(); // Initial fetch
+      interval = setInterval(fetchLogs, 2000); // Poll every 2s
+    }
+    return () => clearInterval(interval);
+  }, [logOpen, activeLogSlug]);
+
+  const openLogs = (slug: string) => {
+    setActiveLogSlug(slug);
+    setBuildLogs("Loading real-time logs...");
+    setLogOpen(true);
+  };
+
   const onUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !buildZip) return;
     setSubmitting(true);
+    setUploadProgress(0);
     try {
-      await PlatformThemes.upload({ name, slug, description, thumbnail, buildZip });
+      await PlatformThemes.upload({
+        name,
+        slug,
+        description,
+        thumbnail,
+        buildZip,
+        onProgress: (percent) => setUploadProgress(percent)
+      });
+      const uploadedSlug = slug; // capture before clear
       setName("");
       setDescription("");
       setThumbnail(null);
       setBuildZip(null);
       setNewOpen(false);
       await load();
+
+      // Auto-open logs for the new upload
+      setTimeout(() => openLogs(uploadedSlug), 500);
     } catch (err) {
       console.error(err);
       showSnackbar("Upload failed", "error");
     } finally {
       setSubmitting(false);
+      setUploadProgress(0);
     }
   };
 
@@ -188,9 +240,10 @@ export default function Page() {
       await load();
       showSnackbar("Theme deleted", "success");
       setNewOpen(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      showSnackbar("Delete failed", "error");
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Delete failed";
+      showSnackbar(msg, "error");
     } finally {
       setSubmitting(false);
     }
@@ -452,9 +505,11 @@ export default function Page() {
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 min-w-[140px]"
               >
                 {submitting ? (
-                  <div className="flex items-center gap-2">
-                    <CircularProgress size={16} className="text-white" />
-                    <span>Uploading...</span>
+                  <div className="flex flex-col items-center w-full">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CircularProgress size={16} className="text-white" />
+                      <span>{uploadProgress < 100 ? `Uploading ${uploadProgress}%` : 'Processing...'}</span>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -464,6 +519,11 @@ export default function Page() {
                 )}
               </Button>
             </DialogActions>
+            {submitting && (
+              <Box sx={{ width: '100%', px: 0 }}>
+                <LinearProgress variant="determinate" value={uploadProgress} sx={{ height: 4 }} />
+              </Box>
+            )}
           </Dialog>
 
           <Card
@@ -483,7 +543,7 @@ export default function Page() {
                 </TableHead>
                 <TableBody>
                   {filtered.length === 0 ? (
-                    <TableRow>
+                    <TableRow key="no-themes">
                       <TableCell colSpan={5}>
                         <div className="py-16 grid place-items-center text-center">
                           <Icon
@@ -502,7 +562,7 @@ export default function Page() {
                     </TableRow>
                   ) : (
                     filtered.map((t, idx) => (
-                      <TableRow key={t._id} hover>
+                      <TableRow key={t._id || t.slug || `theme-${idx}`} hover>
                         <TableCell>{idx + 1}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
@@ -529,13 +589,20 @@ export default function Page() {
                               <div className="flex items-center gap-2">
                                 <div className="font-medium">{t.name}</div>
                                 {t.status === "building" && (
-                                  <div className="flex flex-col gap-1">
+                                  <div className="flex flex-col gap-1 w-full max-w-[140px]">
                                     <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-[10px] font-bold text-blue-600 border border-blue-100 animate-pulse">
                                       <CircularProgress size={8} thickness={6} />
                                       AI BUILDING
                                     </div>
-                                    <div className="text-[9px] font-medium text-slate-400 italic px-1">
-                                      {t.description || "Initializing..."}
+                                    <div className="w-full">
+                                      <LinearProgress
+                                        variant="determinate"
+                                        value={parseInt(t.description?.match(/\((\d+)%\)/)?.[1] || "0")}
+                                        sx={{ height: 4, borderRadius: 2, mb: 0.5 }}
+                                      />
+                                      <div className="text-[9px] font-medium text-slate-400 italic px-1 truncate">
+                                        {t.description || "Initializing..."}
+                                      </div>
                                     </div>
                                   </div>
                                 )}
@@ -566,6 +633,13 @@ export default function Page() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
+                            {t.status === "building" && (
+                              <Tooltip title="View Build Logs">
+                                <IconButton onClick={() => openLogs(t.slug)} size="small">
+                                  <Icon name="Terminal" size={18} className="text-gray-600" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
                             {t.status === "active" ? (
                               <Tooltip title="Preview Theme">
                                 <IconButton
@@ -579,7 +653,7 @@ export default function Page() {
                             ) : (
                               <Tooltip title={t.status === "building" ? "AI is currently building this theme..." : "Build failed"}>
                                 <span>
-                                  <IconButton size="small" disabled>
+                                  <IconButton size="small" onClick={() => openLogs(t.slug)}>
                                     <Icon name="EyeOff" size={18} className="text-slate-300" />
                                   </IconButton>
                                 </span>
@@ -895,7 +969,6 @@ export default function Page() {
                 </div>
               </div>
             </DialogContent>
-
             <DialogActions className="border-t border-gray-200 px-6 py-4 bg-gray-50">
               <Button
                 onClick={() => setEditing(null)}
@@ -924,6 +997,86 @@ export default function Page() {
                 )}
               </Button>
             </DialogActions>
+          </Dialog>
+
+          {/* Real-time Build Console Dialog */}
+          <Dialog
+            open={logOpen}
+            onClose={() => setLogOpen(false)}
+            maxWidth="md"
+            fullWidth
+            PaperProps={{
+              className: "bg-[#0d1117] rounded-xl overflow-hidden shadow-2xl border border-gray-800",
+            }}
+          >
+            <div className="flex items-center justify-between px-6 py-4 bg-[#161b22] border-b border-gray-800">
+              <div className="flex items-center gap-3">
+                <div className="flex gap-1.5">
+                  <div className="w-3 h-3 rounded-full bg-red-500/80" />
+                  <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                  <div className="w-3 h-3 rounded-full bg-green-500/80" />
+                </div>
+                <div className="h-4 w-[1px] bg-gray-700 mx-2" />
+                <div className="flex items-center gap-2">
+                  <Icon name="Terminal" size={14} className="text-blue-400" />
+                  <span className="text-sm font-bold text-gray-300 tracking-tight font-mono">
+                    deployment-logs://{activeLogSlug}
+                  </span>
+                </div>
+              </div>
+              <IconButton
+                onClick={() => setLogOpen(false)}
+                size="small"
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <Icon name="X" size={18} />
+              </IconButton>
+            </div>
+
+            <DialogContent className="p-0 bg-[#0d1117] relative">
+              <div
+                className="font-mono text-[13px] leading-relaxed p-6 h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-800 scrollbar-track-transparent flex flex-col-reverse"
+                style={{ scrollBehavior: 'smooth' }}
+              >
+                <div className="flex flex-col gap-0.5">
+                  {buildLogs ? buildLogs.split("\n").map((line, i) => {
+                    const isError = line.includes("❌") || line.includes("FAILED") || line.toLowerCase().includes("error:");
+                    const isCmd = line.includes("$");
+                    const isStep = line.includes("---");
+
+                    return (
+                      <div key={i} className={`whitespace-pre-wrap break-all ${isError ? 'text-red-400 font-bold bg-red-400/5' : isCmd ? 'text-blue-400 font-bold' : isStep ? 'text-green-400 border-y border-green-500/10 py-1 my-2 bg-green-500/5' : 'text-gray-400'}`}>
+                        {line || " "}
+                      </div>
+                    );
+                  }) : (
+                    <div className="text-gray-500 animate-pulse italic">Initializing stream...</div>
+                  )}
+                  {/* Anchor for auto-scroll */}
+                  <div id="logs-end" />
+                </div>
+              </div>
+
+              <div className="absolute bottom-4 right-6 pointer-events-none">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-600/10 border border-blue-500/20">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
+                  <span className="text-[10px] uppercase font-black text-blue-400 tracking-widest">Live Streaming</span>
+                </div>
+              </div>
+            </DialogContent>
+
+            <div className="px-6 py-3 bg-[#161b22] border-t border-gray-800 flex justify-between items-center">
+              <div className="text-[11px] text-gray-500 font-mono">
+                Location: /uploads/themes/{activeLogSlug}/build_log.txt
+              </div>
+              <Button
+                size="small"
+                className="text-gray-400 hover:text-white font-mono text-xs capitalize"
+                onClick={() => setBuildLogs("")}
+              >
+                Clear View
+              </Button>
+            </div>
           </Dialog>
 
           {/* Delete Confirm */}

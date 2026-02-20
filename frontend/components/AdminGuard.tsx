@@ -32,11 +32,13 @@ export default function AdminGuard({
         }
 
         const userProfile = JSON.parse(profile);
-        const userRole = userProfile?.role?.toLowerCase() || "user";
-        const isAdmin = userRole === "admin" || userRole === "super_admin";
+        const rawRole = userProfile?.role || "user";
+        const userRole = rawRole.toLowerCase().trim();
+        const isAdmin = userRole === "admin" || userRole === "super_admin" || userRole === "superadmin";
 
         // Check if user is admin
         if (!isAdmin) {
+          console.warn(`🛑 AdminGuard: Access denied for role "${rawRole}"`);
           toast.error("Access denied. Admin privileges required.");
 
           // Redirect based on role

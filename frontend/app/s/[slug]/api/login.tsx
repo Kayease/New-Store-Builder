@@ -24,14 +24,77 @@ export default function LoginForm({ slug }: { slug: string }) {
             const storeId = storeRes.data?.store?.id;
             if (!storeId) throw new Error("Store Not Found");
 
+            // 1. Try Customer Login First
             const success = await login(email, password, storeId);
             if (success) {
                 router.push(`/s/${slug}/live`);
-            } else {
-                setError("Login Failed. Check your credentials.");
+                return;
             }
+
+            // 2. If Customer Login fails, try Staff/Manager Login
+            // We use the main API for this
+            const { api: mainApi } = await import("../../../../lib/api");
+
+            try {
+                const staffLogin = await mainApi.post("/auth/login", { email, password });
+
+                if (staffLogin.data.success) {
+                    const userData = staffLogin.data.data.user;
+                    const token = staffLogin.data.data.token;
+
+                    // Store staff credentials
+                    localStorage.setItem("kx_token", token);
+                    localStorage.setItem("kx_profile", JSON.stringify(userData));
+
+                    // Check if they manage THIS store
+                    const userRole = (userData.role || "").toLowerCase();
+                    const validRoles = ["merchant", "admin", "manager", "editor", "support"];
+
+                    // The user might have access to multiple stores. Check if the current slug is in their list.
+                    const accessibleStores = userData.stores || [];
+                    const hasAccess = accessibleStores.some((s: any) => s.slug === slug || s.storeSlug === slug);
+
+                    if (validRoles.includes(userRole)) {
+                        if (hasAccess) {
+                            // Redirect to the dashboard for THIS store
+                            // Set the current store ID for API calls
+                            const targetStore = accessibleStores.find((s: any) => s.slug === slug || s.storeSlug === slug);
+                            if (targetStore) {
+                                localStorage.setItem("merchant.storeId", targetStore.id || targetStore._id);
+                            }
+
+                            // REDIRECTION LOGIC:
+                            // If they are a 'manager', send them to the restricted manager dashboard
+                            // Otherwise (merchant/admin), send them to the full store dashboard
+                            if (userRole === "manager") {
+                                router.push(`/manager/${slug}`);
+                            } else {
+                                router.push(`/store/${slug}`);
+                            }
+                            return;
+                        } else if (userRole === "admin" || userRole === "super_admin") {
+                            // Admins can access anything via admin panel, but here we redirect to admin dashboard
+                            router.push("/admin/dashboard");
+                            return;
+                        } else {
+                            // User is valid staff but not for this specific store
+                            setError("You do not have permission to manage this store.");
+                            localStorage.removeItem("kx_token");
+                            localStorage.removeItem("kx_profile");
+                            return;
+                        }
+                    }
+                }
+            } catch (staffErr: any) {
+                // If staff login also fails, it's a true failure
+                // We don't throw here to let generic error handling catch it if needed, 
+                // but since we are in a try/catch block for the whole function, we continue.
+                // However, likely we want to show "Invalid credentials"
+            }
+
+            setError("Login Failed. Check your credentials.");
         } catch (err: any) {
-            const msg = err.response?.data?.detail || err.message || "Invalid credentials";
+            const msg = err.response?.data?.detail || err.response?.data?.message || err.message || "Invalid credentials";
             setError(msg);
         } finally {
             setLoading(false);

@@ -17,11 +17,50 @@ export default function LiveStorePage() {
     const [error, setError] = useState<string | null>(null);
     const [automatedUrl, setAutomatedUrl] = useState<string | null>(null);
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
+    // Hostname Alignment: Ensure API and Page use the same host (localhost vs 127.0.0.1)
+    const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    const API_URL = `http://${currentHost}:8000/api/v1`;
     const API_BASE = API_URL.replace('/api/v1', '');
 
     useEffect(() => {
         if (storeSlug) loadStore();
+
+        // Listen for Auth messages from the theme iframe
+        const handleAuthMessage = (event: MessageEvent) => {
+            if (event.data?.type === 'AUTH_SUCCESS') {
+                try {
+                    const { token, profile, storeId, redirect } = event.data;
+                    console.log("🔑 Syncing staff session for:", profile?.email);
+
+                    if (!token || !redirect) {
+                        console.error("❌ Malformed auth message:", event.data);
+                        return;
+                    }
+
+                    // Set storage in the TOP window (localhost:3000)
+                    localStorage.setItem("kx_token", token);
+                    localStorage.setItem("kx_profile", JSON.stringify(profile));
+                    localStorage.setItem("merchant.storeId", storeId);
+
+                    // Construct absolute URL
+                    const targetUrl = window.location.origin + redirect;
+                    console.log("🚀 REDIRECTING TOP WINDOW TO:", targetUrl);
+
+                    // Execute redirection
+                    window.location.assign(targetUrl);
+
+                    // Force fallback
+                    setTimeout(() => {
+                        window.location.href = targetUrl;
+                    }, 300);
+                } catch (err) {
+                    console.error("❌ Error processing auth message:", err);
+                }
+            }
+        };
+
+        window.addEventListener('message', handleAuthMessage);
+        return () => window.removeEventListener('message', handleAuthMessage);
     }, [storeSlug]);
 
     const loadStore = async () => {
@@ -51,7 +90,9 @@ export default function LiveStorePage() {
                             const checkRes = await fetch(target, { method: 'HEAD' });
                             if (checkRes.ok) {
                                 console.log("✅ Found valid automated theme at:", target);
-                                setAutomatedUrl(`${target}?store=${storeSlug}`);
+                                // Add timestamp to bust cache
+                                const cacheBuster = `cb=${Date.now()}`;
+                                setAutomatedUrl(`${target}?store=${storeSlug}&${cacheBuster}`);
                                 setLoading(false);
                                 return;
                             }

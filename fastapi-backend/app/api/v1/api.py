@@ -19,7 +19,11 @@ from app.api.v1.endpoints import (
     categories,
     orders,
     customers,
-    live_store
+    live_store,
+    reviews,
+    notices,
+    brands,
+    team
 )
 
 api_router = APIRouter()
@@ -30,7 +34,12 @@ api_router.include_router(products.router, prefix="/store/products", tags=["prod
 api_router.include_router(categories.router, prefix="/store/categories", tags=["categories"])
 api_router.include_router(orders.router, prefix="/store/orders", tags=["orders"])
 api_router.include_router(customers.router, prefix="/store/customers", tags=["customers"])
+api_router.include_router(reviews.router, prefix="/store/reviews", tags=["reviews"])
+api_router.include_router(notices.router, prefix="/notices", tags=["notices"])
+api_router.include_router(brands.router, prefix="/store/brands", tags=["brands"])
+api_router.include_router(team.router, prefix="/store/team", tags=["team"])
 api_router.include_router(stores.router, prefix="/store", tags=["stores"])
+
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(platform_users.router, prefix="/platform", tags=["platform-users"])
 api_router.include_router(subscription_plans.router, prefix="/platform", tags=["subscription-plans"])

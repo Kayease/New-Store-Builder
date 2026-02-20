@@ -231,8 +231,8 @@ export const MerchantAPI = {
 
   // Team management
   team: {
-    list: (params?: any) => apiCall("get", "/store/team", undefined, params),
-    invite: (data: any) => apiCall("post", "/store/team/invite", data),
+    list: (storeId: string) => apiCall("get", "/store/team", undefined, { storeId }),
+    create: (data: any) => apiCall("post", "/store/team", data),
     update: (id: string, data: any) =>
       apiCall("put", `/store/team/${id}`, data),
     remove: (id: string) => apiCall("delete", `/store/team/${id}`),

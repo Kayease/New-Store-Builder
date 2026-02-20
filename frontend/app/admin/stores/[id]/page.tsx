@@ -179,14 +179,14 @@ export default function StoreViewPage() {
 
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
                                     {[
-                                        { label: "Uptime", val: "99.98%", color: "emerald", icon: "Activity" },
-                                        { label: "Requests", val: "1.2k", color: "blue", icon: "Zap" },
-                                        { label: "Latency", val: "42ms", color: "amber", icon: "Clock" },
-                                        { label: "CPU Load", val: "12%", color: "purple", icon: "Cpu" },
+                                        { label: "Active Products", val: store.stats?.activeProducts || 0, color: "indigo", icon: "Package" },
+                                        { label: "Active Customers", val: store.stats?.activeCustomers || 0, color: "emerald", icon: "Users" },
+                                        { label: "Categories", val: store.stats?.activeCategories || 0, color: "amber", icon: "Tag" },
+                                        { label: "Team Size", val: store.stats?.teamSize || 0, color: "purple", icon: "Shield" },
                                     ].map((stat, i) => (
                                         <div key={i} className="space-y-2">
                                             <div className="flex items-center gap-2 text-slate-400">
-                                                <Icon name={stat.icon} size={14} />
+                                                <Icon name={stat.icon as any} size={14} />
                                                 <span className="text-[10px] font-bold uppercase tracking-wider">{stat.label}</span>
                                             </div>
                                             <p className={`text-xl font-black text-${stat.color}-600`}>{stat.val}</p>
@@ -194,8 +194,12 @@ export default function StoreViewPage() {
                                     ))}
                                 </div>
 
-                                <div className="mt-10 h-32 w-full bg-slate-50 rounded-2xl border border-dashed border-slate-200 flex items-center justify-center text-slate-300 font-bold text-xs uppercase tracking-widest">
-                                    Telemetry Stream Offline
+                                <div className="mt-10 h-32 w-full bg-indigo-50/30 rounded-2xl border border-dashed border-indigo-200 flex flex-col items-center justify-center text-indigo-600 font-bold text-xs uppercase tracking-widest gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                        Real-time Database Connection Active
+                                    </div>
+                                    <span className="text-[9px] text-slate-400 font-medium lowercase italic">All stats fetched live from registry</span>
                                 </div>
                             </div>
 

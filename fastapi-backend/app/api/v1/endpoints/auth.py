@@ -152,6 +152,26 @@ async def login_user(user: UserLogin):
         except Exception as stores_err:
             print(f"⚠️ Stores fetch failed during login: {stores_err}")
 
+        # 3b. Fetch stores where user is a STAFF/MANAGER
+        # If they are not an owner, they might be a manager
+        try:
+            managed_stores_res = supabase_admin.table("store_managers").select("store_id, role").eq("user_id", user_data.id).execute()
+            if managed_stores_res.data:
+                print(f"🕵️ User is manager for {len(managed_stores_res.data)} stores")
+                for m in managed_stores_res.data:
+                    # Fetch the actual store data
+                    s_res = supabase_admin.table("stores").select("*").eq("id", m["store_id"]).single().execute()
+                    if s_res.data:
+                        s = s_res.data
+                        s_copy = s.copy()
+                        s_copy["_id"] = s.get("id")
+                        s_copy["user_role"] = m["role"] # Attach specific role for this store
+                        # Prevent duplicates if they are somehow both (unlikely but safe)
+                        if not any(existing["id"] == s["id"] for existing in stores):
+                            stores.append(s_copy)
+        except Exception as manager_err:
+             print(f"⚠️ Manager stores fetch failed: {manager_err}")
+
         # 4. Determine role (lowercase for frontend consistency)
         role = (profile.get("role") or metadata.get("role") or "user").lower()
         
@@ -179,7 +199,8 @@ async def login_user(user: UserLogin):
                     "lastName": profile.get("last_name") or metadata.get("last_name", ""),
                     "fullName": f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or f"{metadata.get('first_name', '')} {metadata.get('last_name', '')}".strip(),
                     "phone": profile.get("phone") or metadata.get("phone", ""),
-                    "storeId": stores[0].get("id") if stores else None,
+                    "storeId": stores[0].get("id") if stores else profile.get("store_id") or profile.get("metadata", {}).get("storeId"),
+                    "storeSlug": stores[0].get("slug") if stores else profile.get("store_slug"),
                     "stores": stores,
                     "status": profile.get("status", "active")
                 }
@@ -281,8 +302,8 @@ async def get_profile(user_data: dict = Depends(verify_token)):
             "phone": profile.get("phone", ""),
             "role": role,
             "status": profile.get("status", "active"),
-            "storeId": stores[0].get("id") if stores else None,
-            "storeSlug": stores[0].get("slug") if stores else None,
+            "storeId": stores[0].get("id") if stores else profile.get("store_id"),
+            "storeSlug": stores[0].get("slug") if stores else profile.get("store_slug"),
             "stores": stores,
         }
         
@@ -327,8 +348,8 @@ async def get_profile(user_data: dict = Depends(verify_token)):
                     "lastName": user_data.get("user_metadata", {}).get("last_name", ""),
                     "role": (user_data.get("user_metadata", {}).get("role") or "user").lower(),
                     "status": "active",
-                    "storeId": stores[0].get("id") if stores else None,
-                    "storeSlug": stores[0].get("slug") if stores else None,
+                    "storeId": stores[0].get("id") if stores else user_data.get("user_metadata", {}).get("store_id"),
+                    "storeSlug": stores[0].get("slug") if stores else user_data.get("user_metadata", {}).get("store_slug"),
                     "stores": stores,
                 }
             }

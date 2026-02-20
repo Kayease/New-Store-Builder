@@ -12,7 +12,7 @@ console.log("🔌 API Base URL:", BASE_URL);
 
 export const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000, // 30 second timeout for slower operations like registration
+  timeout: 120000, // Increased to 2 minutes for standard requests
 });
 
 // Add request interceptor to log API requests
@@ -353,6 +353,7 @@ export const PlatformThemes = {
     description?: string;
     thumbnail?: File | null;
     buildZip: File;
+    onProgress?: (percent: number) => void;
   }) => {
     const form = new FormData();
     form.append("name", payload.name);
@@ -364,6 +365,14 @@ export const PlatformThemes = {
       .post(`/platform/themes`, form, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 600000, // 10 minutes for large zip uploads
+        onUploadProgress: (progressEvent) => {
+          if (payload.onProgress && progressEvent.total) {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+            payload.onProgress(percentCompleted);
+          }
+        },
       })
       .then((r) => r.data);
   },
@@ -394,6 +403,8 @@ export const PlatformThemes = {
   },
   remove: (slug: string) =>
     api.delete(`/platform/themes/${slug}`).then((r) => r.data),
+  getLogs: (slug: string) =>
+    api.get(`/platform/themes/${slug}/logs`).then((r) => r.data),
 };
 
 // Public Themes (no auth required)

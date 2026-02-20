@@ -47,7 +47,10 @@ export default function StoreGuard({ children }: StoreGuardProps) {
         const isPlansPage = currentPath.includes("/plans");
 
         // Check if user is admin (admins can access any store)
-        if (user.role === "admin") {
+        const role = user?.role?.toLowerCase()?.trim();
+        const isAdmin = role === "admin" || role === "super_admin" || role === "superadmin";
+
+        if (isAdmin) {
           setIsAuthorized(true);
           setIsChecking(false);
           return;

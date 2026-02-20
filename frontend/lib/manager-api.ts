@@ -49,7 +49,7 @@ async function getStoreIdFromToken(): Promise<string | null> {
         const cached = sessionStorage.getItem(`store.slugToId.${slug}`);
         if (cached) return cached;
         try {
-          const res = await managerApi.get(`/store-check/${slug}`);
+          const res = await managerApi.get(`/store/store-check/${slug}`);
           const id = res?.data?.data?.store?._id || res?.data?.store?._id;
           if (id) {
             sessionStorage.setItem(`store.slugToId.${slug}`, id);

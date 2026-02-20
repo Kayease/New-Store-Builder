@@ -45,6 +45,14 @@ async def get_merchant_stats(store_id: str):
         # 5. Categories Count
         categories_res = supabase_admin.table("categories").select("id", count="exact").eq("store_id", store_id).execute()
         total_categories = categories_res.count or 0
+
+        # Brands Count
+        brands_res = supabase_admin.table("brands").select("id", count="exact").eq("store_id", store_id).execute()
+        total_brands = brands_res.count or 0
+
+        # Notices Count
+        notices_res = supabase_admin.table("notices").select("id", count="exact").eq("store_id", store_id).execute()
+        total_notices = notices_res.count or 0
         
         # 6. Sales Data for Chart (Last 30 days)
         last_30_days = []
@@ -97,6 +105,7 @@ async def get_merchant_stats(store_id: str):
             "stats": [
                 {"label": "Gross Sale", "value": f"₹{gross_sales:,.2f}", "delta": "+12% | (30 days)"},
                 {"label": "Net Sale", "value": f"₹{gross_sales * 0.85:,.2f}", "delta": "+8% | (30 days)"},
+                {"label": "Total Customers", "value": total_customers, "delta": "Active Users"},
                 {"label": "Refunded Orders", "value": 0},
                 {"label": "Cancelled Orders", "value": 1},
                 {"label": "My Orders", "value": total_orders}
@@ -105,9 +114,9 @@ async def get_merchant_stats(store_id: str):
                 "products": total_products,
                 "customers": total_customers,
                 "orders": total_orders,
-                "brands": 0,
+                "brands": total_brands,
                 "categories": total_categories,
-                "notices": 2
+                "notices": total_notices
             },
             "recent_orders": recent_orders or [
                 {"id": "ORD-001", "customer": "John Doe", "amount": 1200, "status": "completed", "date": (datetime.now() - timedelta(hours=2)).isoformat()},

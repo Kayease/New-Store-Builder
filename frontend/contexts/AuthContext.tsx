@@ -364,11 +364,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
         setUser(userData);
 
-        // Determine navigation path
-        const userRole = userData.role?.toLowerCase();
-        const isAdmin = userRole === "admin" || userRole === "super_admin";
+        // Determine navigation path - Normalize role for robust checking
+        const rawRole = userData.role || "";
+        const userRole = rawRole.toLowerCase().trim();
+        const isAdmin = userRole === "admin" || userRole === "super_admin" || userRole === "superadmin";
 
-        console.log("🔐 Login success. User:", userData.email, "Role:", userRole, "isAdmin:", isAdmin);
+        console.log("🔐 Login success. User:", userData.email, "Raw Role:", rawRole, "Normalized Role:", userRole, "isAdmin:", isAdmin);
 
         // 1. Priority: Admin Dashboard
         if (isAdmin) {

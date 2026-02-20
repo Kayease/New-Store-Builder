@@ -203,42 +203,7 @@ async def get_store_by_slug(slug: str):
         print(f"Error fetching store by slug: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{store_id}")
-async def get_store_details(store_id: str):
-    """
-    Get Store By ID
-    """
-    try:
-        response = supabase_admin.table("stores").select("*").eq("id", store_id).single().execute()
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Store not found")
-        
-        store = response.data
-        return {
-            "success": True,
-            "data": {
-                "_id": store.get("id"),
-                "id": store.get("id"),
-                "storeName": store.get("store_name") or store.get("name", ""),
-                "storeSlug": store.get("slug", ""),
-                "name": store.get("store_name") or store.get("name", ""),
-                "slug": store.get("slug", ""),
-                "status": store.get("status", "active"),
-                "isActive": store.get("status") == "active",
-                "ownerId": store.get("owner_id"),
-                "planId": store.get("plan_id"),
-                "themeId": (store.get("config") or {}).get("theme_id"),
-                "createdAt": store.get("created_at"),
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error fetching store details: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+
 
 @router.get("/slug/{slug}/check")
 async def check_slug_availability(slug: str):
@@ -498,203 +463,8 @@ class StoreVerifyOTP(BaseModel):
 # In-memory OTP storage for store settings
 store_otp_storage = {}
 
-# --- Team Management Endpoints ---
+# --- Team Management moved to team.py ---
 
-class TeamInvite(BaseModel):
-    name: str
-    email: str
-    role: str
-    description: Optional[str] = None
-    active: Optional[bool] = True
-    storeId: str
-
-@router.get("/team")
-async def list_store_team(storeId: str, current_user: dict = Depends(verify_token)):
-    """
-    List team members for a store.
-    """
-    try:
-        # 1. Resolve store ID to slug (since profiles table uses slug)
-        store_res = supabase_admin.table("stores").select("slug").eq("id", storeId).single().execute()
-        if not store_res.data:
-            raise HTTPException(status_code=404, detail="Store not found")
-        
-        slug = store_res.data["slug"]
-        
-        # 2. Fetch profiles linked to this store slug
-        profiles_res = supabase_admin.table("profiles").select("*").eq("store_slug", slug).execute()
-        members = profiles_res.data or []
-        
-        # Format for frontend
-        formatted = []
-        for m in members:
-            formatted.append({
-                "id": m["id"],
-                "_id": m["id"],
-                "name": f"{m.get('first_name', '')} {m.get('last_name', '')}".strip() or m.get('email'),
-                "email": m.get("email"),
-                "phone": m.get("phone"),
-                "role": m.get("role", "staff"),
-                "active": m.get("status") == "active",
-                "avatar": m.get("avatar_url"),
-                "description": m.get("description"),
-                "skills": [] # Can be added if needed
-            })
-            
-        return {
-            "success": True,
-            "data": {
-                "items": formatted,
-                "total": len(formatted)
-            }
-        }
-    except Exception as e:
-        print(f"Error listing team: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/team/invite")
-async def invite_team_member(payload: TeamInvite, current_user: dict = Depends(verify_token)):
-    """
-    Invite a new team member by creating a user and profile.
-    """
-    try:
-        # 1. Resolve store slug
-        store_res = supabase_admin.table("stores").select("slug, name").eq("id", payload.storeId).single().execute()
-        if not store_res.data:
-            raise HTTPException(status_code=404, detail="Store not found")
-        
-        store_slug = store_res.data["slug"]
-        store_name = store_res.data["name"]
-        
-        # 2. Check if user already exists in Auth
-        # Note: In real world, might need to handle existing users differently
-        
-        # 3. Create dummy password or handle invite flow (using dummy password for now)
-        import secrets
-        import string
-        dummy_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
-        
-        # Split name
-        name_parts = payload.name.split(" ", 1)
-        f_name = name_parts[0]
-        l_name = name_parts[1] if len(name_parts) > 1 else ""
-        
-        # 4. Create user in Supabase Auth
-        auth_attr = {
-            "email": payload.email,
-            "password": dummy_password,
-            "email_confirm": True,
-            "user_metadata": {
-                "first_name": f_name,
-                "last_name": l_name,
-                "role": payload.role,
-                "store_slug": store_slug,
-                "store_name": store_name
-            }
-        }
-        
-        auth_res = supabase_admin.auth.admin.create_user(auth_attr)
-        if not auth_res.user:
-            raise HTTPException(status_code=400, detail="Failed to create user in Auth")
-        
-        user_id = auth_res.user.id
-        
-        # 5. Create profile record
-        profile_data = {
-            "id": user_id,
-            "email": payload.email,
-            "first_name": f_name,
-            "last_name": l_name,
-            "role": payload.role,
-            "store_slug": store_slug,
-            "store_name": store_name,
-            "status": "active" if payload.active else "inactive"
-        }
-        
-        supabase_admin.table("profiles").upsert(profile_data).execute()
-        
-        return {
-            "success": True,
-            "message": "Team member invited successfully",
-            "data": {
-                "id": user_id,
-                "email": payload.email,
-                "temporary_password": dummy_password # In production, send via email
-            }
-        }
-    except Exception as e:
-        print(f"Error inviting team member: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.put("/team/{member_id}")
-async def update_team_member(member_id: str, payload: Dict[str, Any], current_user: dict = Depends(verify_token)):
-    """
-    Update a team member's profile and metadata.
-    """
-    try:
-        # Prepare updates for profiles table
-        profile_updates = {}
-        if "name" in payload:
-            parts = payload["name"].split(" ", 1)
-            profile_updates["first_name"] = parts[0]
-            if len(parts) > 1: profile_updates["last_name"] = parts[1]
-        
-        if "role" in payload: profile_updates["role"] = payload["role"]
-        if "active" in payload: profile_updates["status"] = "active" if payload["active"] else "inactive"
-        
-        # Update Profiles table
-        supabase_admin.table("profiles").update(profile_updates).eq("id", member_id).execute()
-        
-        # Update Auth metadata as well
-        auth_metadata = {}
-        if "first_name" in profile_updates: auth_metadata["first_name"] = profile_updates["first_name"]
-        if "last_name" in profile_updates: auth_metadata["last_name"] = profile_updates["last_name"]
-        if "role" in profile_updates: auth_metadata["role"] = profile_updates["role"]
-        
-        if auth_metadata:
-            supabase_admin.auth.admin.update_user_by_id(member_id, {"user_metadata": auth_metadata})
-            
-        return {"success": True, "message": "Member updated successfully"}
-    except Exception as e:
-        print(f"Error updating team: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.delete("/team/{member_id}")
-async def remove_team_member(member_id: str, current_user: dict = Depends(verify_token)):
-    """
-    Remove a team member's access.
-    """
-    try:
-        # 1. Delete user from auth (this should cascade if set up, but let's be explicit)
-        supabase_admin.auth.admin.delete_user(member_id)
-        
-        # 2. Delete profile
-        supabase_admin.table("profiles").delete().eq("id", member_id).execute()
-        
-        return {"success": True, "message": "Member removed successfully"}
-    except Exception as e:
-        print(f"Error removing team member: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.patch("/team/{member_id}/toggle")
-async def toggle_team_member(member_id: str, current_user: dict = Depends(verify_token)):
-    """
-    Toggle active/inactive status.
-    """
-    try:
-        # 1. Get current status
-        res = supabase_admin.table("profiles").select("status").eq("id", member_id).single().execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Member not found")
-            
-        new_status = "inactive" if res.data["status"] == "active" else "active"
-        
-        # 2. Update
-        supabase_admin.table("profiles").update({"status": new_status}).eq("id", member_id).execute()
-        
-        return {"success": True, "status": new_status}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/send-otp")
 async def send_store_otp(payload: StoreSendOTP, current_user: dict = Depends(verify_token)):
@@ -737,3 +507,70 @@ async def verify_store_otp(payload: StoreVerifyOTP, current_user: dict = Depends
         }
         
     raise HTTPException(status_code=400, detail="Invalid OTP")
+    
+@router.get("/{store_id}")
+async def get_store_details(store_id: str):
+    """
+    Get Store By ID with Statistics
+    """
+    try:
+        # 1. Fetch Store Basic Info
+        response = supabase_admin.table("stores").select("*").eq("id", store_id).single().execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Store not found")
+        
+        store = response.data
+
+        # 2. Fetch Real Statistics
+        # Count Products
+        prod_res = supabase_admin.table("products").select("id", count="exact").eq("store_id", store_id).limit(1).execute()
+        prod_count = getattr(prod_res, 'count', 0)
+        
+        # Count Customers
+        cust_res = supabase_admin.table("customers").select("id", count="exact").eq("store_id", store_id).limit(1).execute()
+        cust_count = getattr(cust_res, 'count', 0)
+        
+        # Count Categories
+        cat_res = supabase_admin.table("categories").select("id", count="exact").eq("store_id", store_id).limit(1).execute()
+        cat_count = getattr(cat_res, 'count', 0)
+        
+        # Count Team Members
+        store_slug = store.get("slug")
+        team_res = supabase_admin.table("profiles").select("id", count="exact").eq("store_slug", store_slug).limit(1).execute() if store_slug else None
+        team_count = getattr(team_res, 'count', 0) if team_res else 0
+
+        return {
+            "success": True,
+            "data": {
+                "_id": store.get("id"),
+                "id": store.get("id"),
+                "storeName": store.get("store_name") or store.get("name", ""),
+                "storeSlug": store.get("slug", ""),
+                "name": store.get("store_name") or store.get("name", ""),
+                "slug": store.get("slug", ""),
+                "status": store.get("status", "active"),
+                "isActive": store.get("status") == "active",
+                "ownerId": store.get("owner_id"),
+                "planId": store.get("plan_id"),
+                "themeId": (store.get("config") or {}).get("theme_id"),
+                "createdAt": store.get("created_at"),
+                "custom_domain": store.get("custom_domain"),
+                # Real Stats
+                "stats": {
+                    "activeProducts": prod_count,
+                    "activeCustomers": cust_count,
+                    "activeCategories": cat_count,
+                    "teamSize": team_count,
+                    "uptime": "99.99%", # Static for now
+                    "latency": "24ms"    # Static for now
+                }
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching store details: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

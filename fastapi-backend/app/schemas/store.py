@@ -39,6 +39,7 @@ class StoreResponse(BaseModel):
     manager_email: Optional[str] = None
     manager_phone: Optional[str] = None
     created_at: Optional[str] = None
+    stats: Optional[dict] = None
 
 class StoreListResponse(BaseModel):
     items: List[StoreResponse]
