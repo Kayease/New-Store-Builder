@@ -44,15 +44,19 @@ export default function LiveStorePage() {
 
                     // Construct absolute URL
                     const targetUrl = window.location.origin + redirect;
-                    console.log("🚀 REDIRECTING TOP WINDOW TO:", targetUrl);
+                    console.log("🚀 REDIRECTING:", targetUrl);
 
-                    // Execute redirection
-                    window.location.assign(targetUrl);
-
-                    // Force fallback
-                    setTimeout(() => {
-                        window.location.href = targetUrl;
-                    }, 300);
+                    if (event.data.openInNewTab) {
+                        window.open(targetUrl, '_blank');
+                        // Optionally reload current page to show logged-in state if desired
+                        // window.location.reload();
+                    } else {
+                        window.location.assign(targetUrl);
+                        // Force fallback
+                        setTimeout(() => {
+                            window.location.href = targetUrl;
+                        }, 300);
+                    }
                 } catch (err) {
                     console.error("❌ Error processing auth message:", err);
                 }
@@ -79,8 +83,9 @@ export default function LiveStorePage() {
                 if (data.theme?.slug) {
                     const tSlug = data.theme.slug;
                     const entryPoints = [
-                        `/uploads/themes/${tSlug}/out/index.html`,
-                        `/uploads/themes/${tSlug}/index.html`
+                        `/uploads/stores/${storeSlug}/out/index.html`, // Priority 1: Isolated Merchant Store
+                        `/uploads/themes/${tSlug}/out/index.html`,     // Priority 2: Standard Theme
+                        `/uploads/themes/${tSlug}/index.html`          // Priority 3: Fallback
                     ];
 
                     for (const path of entryPoints) {

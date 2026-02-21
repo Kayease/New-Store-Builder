@@ -4,17 +4,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # Supabase Key and URL
-    SUPABASE_URL: str
-    SUPABASE_KEY: str
-    SUPABASE_SERVICE_KEY: str
-    SUPABASE_JWT_SECRET: str
+    SUPABASE_URL: Union[str, None] = None
+    SUPABASE_KEY: Union[str, None] = None
+    SUPABASE_SERVICE_KEY: Union[str, None] = None
+    SUPABASE_JWT_SECRET: Union[str, None] = None
     
     # Database
-    DATABASE_URL: str
+    DATABASE_URL: Union[str, None] = None
     
     # Razorpay
-    RAZORPAY_KEY_ID: str
-    RAZORPAY_KEY_SECRET: str
+    RAZORPAY_KEY_ID: Union[str, None] = None
+    RAZORPAY_KEY_SECRET: Union[str, None] = None
     
     # Cloudinary - Optional
     CLOUDINARY_CLOUD_NAME: Union[str, None] = None

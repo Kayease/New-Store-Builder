@@ -20,10 +20,32 @@ ROOT_DIR = Path(__file__).resolve().parents[1] # 0=app, 1=fastapi-backend
 PROJECT_ROOT = ROOT_DIR.parent # Store-Builder
 UPLOADS_DIR = PROJECT_ROOT / "uploads"
 
-if not UPLOADS_DIR.exists():
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+class SmartStaticFiles(StaticFiles):
+    """Custom static file handler to properly resolve Next.js static exports."""
+    async def get_response(self, path: str, scope):
+        # 1. Normalize path to use forward slashes (fixes Windows backslash issues)
+        path = path.replace("\\", "/")
+        
+        # 2. Try the standard file first
+        response = await super().get_response(path, scope)
+        
+        # 3. If 404, try appending .html (Next.js clean urls: /login -> /login.html)
+        if response.status_code == 404 and not path.endswith(".html"):
+            html_path = f"{path}.html"
+            response = await super().get_response(html_path, scope)
+            
+        # 4. If still 404, try path/index.html (Next.js directory exports: /login -> /login/index.html)
+        if response.status_code == 404:
+            # Manually construct path with forward slash to avoid os.path.join using backslashes
+            if path.endswith("/"):
+                index_path = f"{path}index.html"
+            else:
+                index_path = f"{path}/index.html"
+            response = await super().get_response(index_path, scope)
+            
+        return response
 
-app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR), html=True), name="uploads")
+app.mount("/uploads", SmartStaticFiles(directory=str(UPLOADS_DIR), html=True), name="uploads")
 
 # Comprehensive CORS setup
 app.add_middleware(

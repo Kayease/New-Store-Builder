@@ -16,6 +16,10 @@ import {
     Chip,
     Tooltip,
     IconButton,
+    Dialog,
+    DialogContent,
+    Box,
+    LinearProgress,
 } from "@mui/material";
 import { toast } from "react-toastify";
 
@@ -37,6 +41,12 @@ export default function MerchantThemesPage() {
     const [activeThemeId, setActiveThemeId] = useState<string | null>(null);
     const [updating, setUpdating] = useState<string | null>(null);
     const [currentPlan, setCurrentPlan] = useState<any>(null);
+
+    // Deployment Hub State
+    const [deployingTheme, setDeployingTheme] = useState<ThemeItem | null>(null);
+    const [deployProgress, setDeployProgress] = useState(0);
+    const [deployLogs, setDeployLogs] = useState<string[]>([]);
+    const [isDeployComplete, setIsDeployComplete] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -98,20 +108,43 @@ export default function MerchantThemesPage() {
         const themeId = theme.id || theme._id;
         if (themeId === activeThemeId) return;
 
-        setUpdating(themeId);
-        try {
-            // Using the specialized apply endpoint which triggers AI theme activation
-            await PublicThemes.apply(storeSlug, theme.slug);
-            setActiveThemeId(themeId);
-            toast.success("Theme update initiated! AI processing is running in the background.");
+        setDeployingTheme(theme);
+        setDeployProgress(0);
+        setDeployLogs(["Contacting AI deployment server..."]);
+        setIsDeployComplete(false);
 
-            // Refresh data to show processing status if applicable
-            setTimeout(() => loadData(), 2000);
+        try {
+            // Start the actual API call (returns immediately after starting background task)
+            await PublicThemes.apply(storeSlug, theme.slug);
+
+            // Start polling for real-time status
+            const pollInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/themes/deployment-status/${storeSlug}`);
+                    if (res.ok) {
+                        const status = await res.json();
+                        setDeployProgress(status.progress || 0);
+                        setDeployLogs(status.logs || []);
+
+                        if (status.status === "completed" || status.progress === 100) {
+                            clearInterval(pollInterval);
+                            setIsDeployComplete(true);
+                            setActiveThemeId(themeId);
+                            loadData();
+                        } else if (status.status === "failed") {
+                            clearInterval(pollInterval);
+                            toast.error("AI Deployment failed. Check logs.");
+                        }
+                    }
+                } catch (e) {
+                    console.error("Polling error:", e);
+                }
+            }, 2000);
+
         } catch (err) {
-            console.error("Failed to update theme:", err);
-            toast.error("Failed to update theme. Please try again.");
-        } finally {
-            setUpdating(null);
+            console.error("Failed to initiate update:", err);
+            setDeployLogs(prev => [...prev, "❌ Connection Error: Verification failed."]);
+            toast.error("Failed to update theme.");
         }
     };
 
@@ -216,11 +249,13 @@ export default function MerchantThemesPage() {
                                                 </div>
                                             ) : (
                                                 <Button
+                                                    component="a"
+                                                    href={`/theme/${theme.slug}/preview`}
+                                                    target="_blank"
                                                     variant="contained"
                                                     size="small"
                                                     color="inherit"
                                                     sx={{ bgcolor: "white", color: "black", fontWeight: "bold" }}
-                                                    onClick={() => window.open(`/theme/${theme.slug}/preview`, "_blank")}
                                                     startIcon={<Icon name="Eye" size={16} />}
                                                 >
                                                     Preview
@@ -304,6 +339,148 @@ export default function MerchantThemesPage() {
                     </div>
                 )}
             </div>
+
+            {/* Premium Deployment Hub - Glassmorphism UI */}
+            <Dialog
+                open={!!deployingTheme}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: "24px",
+                        bgcolor: "rgba(255, 255, 255, 0.8)",
+                        backdropFilter: "blur(20px)",
+                        border: "1px solid rgba(255, 255, 255, 0.3)",
+                        boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                        overflow: "hidden"
+                    }
+                }}
+            >
+                <DialogContent sx={{ p: 0 }}>
+                    <Box sx={{ p: 4, textAlign: "center", position: "relative" }}>
+                        {/* Background Pulse Decor */}
+                        <Box sx={{
+                            position: "absolute",
+                            top: -50,
+                            left: -50,
+                            width: 150,
+                            height: 150,
+                            bgcolor: "primary.main",
+                            borderRadius: "50%",
+                            opacity: 0.1,
+                            filter: "blur(40px)",
+                            animation: "pulse 4s infinite"
+                        }} />
+
+                        <Box sx={{ mb: 3, position: "relative" }}>
+                            <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-blue-200 animate-bounce-slow">
+                                <Icon name="Cpu" size={40} color="white" />
+                            </div>
+                        </Box>
+
+                        <Typography variant="h5" fontWeight={900} sx={{ mb: 1, letterSpacing: "-0.02em" }}>
+                            {isDeployComplete ? "Your Store is Ready!" : "AI is Building Your Store"}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+                            Theme: <span className="font-bold text-blue-600">{deployingTheme?.name}</span>
+                        </Typography>
+
+                        {/* Progress Bar Container */}
+                        <Box sx={{ mb: 4, px: 2 }}>
+                            <Box sx={{ flexGrow: 1, position: "relative" }}>
+                                <LinearProgress
+                                    variant="determinate"
+                                    value={deployProgress}
+                                    sx={{
+                                        height: 12,
+                                        borderRadius: 6,
+                                        bgcolor: "rgba(59, 130, 246, 0.1)",
+                                        "& .MuiLinearProgress-bar": {
+                                            borderRadius: 6,
+                                            background: "linear-gradient(90deg, #3b82f6 0%, #6366f1 100%)",
+                                        }
+                                    }}
+                                />
+                                <Typography
+                                    variant="caption"
+                                    fontWeight={900}
+                                    sx={{
+                                        position: "absolute",
+                                        right: 0,
+                                        top: -20,
+                                        color: "primary.main"
+                                    }}
+                                >
+                                    {deployProgress}%
+                                </Typography>
+                            </Box>
+                        </Box>
+
+                        {/* Animated Live Logs */}
+                        <Box sx={{
+                            bgcolor: "rgba(0, 0, 0, 0.03)",
+                            borderRadius: "16px",
+                            p: 2,
+                            textAlign: "left",
+                            height: "120px",
+                            overflowY: "auto",
+                            border: "1px solid rgba(0,0,0,0.05)",
+                            fontFamily: "monospace",
+                            fontSize: "12px"
+                        }}>
+                            {deployLogs.map((log, i) => (
+                                <div key={i} className={`mb-1 flex items-center gap-2 ${i === deployLogs.length - 1 ? "text-blue-600 font-bold animate-pulse" : "text-gray-500"}`}>
+                                    <span className="opacity-30">[{new Date().toLocaleTimeString([], { hour12: false })}]</span>
+                                    <span>{log}</span>
+                                    {i === deployLogs.length - 1 && !isDeployComplete && <span className="w-1 h-1 rounded-full bg-blue-600 animate-ping" />}
+                                </div>
+                            ))}
+                            {isDeployComplete && (
+                                <div className="mt-2 text-green-600 font-black flex items-center gap-2">
+                                    <Icon name="CheckCircle2" size={14} />
+                                    <span>PROVISIONING SUCCESSFUL</span>
+                                </div>
+                            )}
+                        </Box>
+
+                        {isDeployComplete && (
+                            <Box sx={{ mt: 4, display: "flex", gap: 2 }}>
+                                <Button
+                                    fullWidth
+                                    variant="outlined"
+                                    onClick={() => setDeployingTheme(null)}
+                                    sx={{ borderRadius: "12px", py: 1.5, fontWeight: "bold" }}
+                                >
+                                    Finish
+                                </Button>
+                                <Button
+                                    fullWidth
+                                    variant="contained"
+                                    onClick={() => window.open(`/s/${storeSlug}/live`, "_blank")}
+                                    sx={{ borderRadius: "12px", py: 1.5, fontWeight: "bold", background: "linear-gradient(90deg, #3b82f6 0%, #6366f1 100%)" }}
+                                >
+                                    Visit Store →
+                                </Button>
+                            </Box>
+                        )}
+                    </Box>
+                </DialogContent>
+            </Dialog>
+
+            <style jsx global>{`
+                @keyframes pulse {
+                    0% { transform: scale(1); opacity: 0.1; }
+                    50% { transform: scale(1.5); opacity: 0.2; }
+                    100% { transform: scale(1); opacity: 0.1; }
+                }
+                @keyframes bounce-slow {
+                    0%, 100% { transform: translateY(0); }
+                    50% { transform: translateY(-10px); }
+                }
+                .animate-bounce-slow {
+                    animation: bounce-slow 3s infinite ease-in-out;
+                }
+            `}</style>
         </ManagerLayout>
     );
 }

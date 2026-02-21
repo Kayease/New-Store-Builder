@@ -134,48 +134,53 @@ async def login_user(user: UserLogin):
         # 2. Fetch additional profile data from Supabase Profiles table
         profile = {}
         try:
-            profile_response = supabase_admin.table("profiles").select("*").eq("id", user_data.id).single().execute()
-            profile = profile_response.data or {}
+            profile_response = supabase_admin.table("profiles").select("*").eq("id", user_data.id).execute()
+            if profile_response.data:
+                profile = profile_response.data[0]
+            
+            # SELF-HEALING: If profile is missing but user authenticated, create it.
+            if not profile:
+                print(f"🔧 Self-healing: Creating missing profile for {user_data.email}")
+                profile_data = {
+                    "id": user_data.id,
+                    "email": user_data.email,
+                    "role": (metadata.get("role") or "MERCHANT").upper(),
+                    "status": "active"
+                }
+                supabase_admin.table("profiles").insert(profile_data).execute()
+                profile = profile_data
         except Exception as profile_err:
-            print(f"⚠️ Profile fetch failed during login: {profile_err}")
+            print(f"⚠️ Profile fetch/heal failed during login: {profile_err}")
 
         # 3. Fetch user's stores
         stores = []
         try:
-            stores_response = supabase_admin.table("stores").select("*").eq("owner_id", user_data.id).execute()
-            # Map id to _id for frontend compatibility if needed
-            stores = []
-            for s in stores_response.data:
-                s_copy = s.copy()
-                s_copy["_id"] = s.get("id")
-                stores.append(s_copy)
-        except Exception as stores_err:
-            print(f"⚠️ Stores fetch failed during login: {stores_err}")
-
-        # 3b. Fetch stores where user is a STAFF/MANAGER
-        # If they are not an owner, they might be a manager
-        try:
-            managed_stores_res = supabase_admin.table("store_managers").select("store_id, role").eq("user_id", user_data.id).execute()
-            if managed_stores_res.data:
-                print(f"🕵️ User is manager for {len(managed_stores_res.data)} stores")
-                for m in managed_stores_res.data:
-                    # Fetch the actual store data
+            # Check for ownership
+            owner_res = supabase_admin.table("stores").select("*").eq("owner_id", user_data.id).execute()
+            stores = owner_res.data or []
+            
+            # Check for management roles
+            managed_res = supabase_admin.table("store_managers").select("store_id, role").eq("user_id", user_data.id).execute()
+            if managed_res.data:
+                for m in managed_res.data:
                     s_res = supabase_admin.table("stores").select("*").eq("id", m["store_id"]).single().execute()
                     if s_res.data:
-                        s = s_res.data
-                        s_copy = s.copy()
-                        s_copy["_id"] = s.get("id")
-                        s_copy["user_role"] = m["role"] # Attach specific role for this store
-                        # Prevent duplicates if they are somehow both (unlikely but safe)
-                        if not any(existing["id"] == s["id"] for existing in stores):
-                            stores.append(s_copy)
-        except Exception as manager_err:
-             print(f"⚠️ Manager stores fetch failed: {manager_err}")
+                        s_data = s_res.data
+                        s_data["user_role"] = m["role"]
+                        if not any(x["id"] == s_data["id"] for x in stores):
+                            stores.append(s_data)
+        except Exception as stores_err:
+            print(f"⚠️ Stores lookup failed: {stores_err}")
 
         # 4. Determine role (lowercase for frontend consistency)
         role = (profile.get("role") or metadata.get("role") or "user").lower()
         
-        # 5. Token Handling: If Admin, generate a long-lived custom token
+        # UNIFICATION: Map 'manager' to 'merchant' so the theme dashboard logic triggers correctly
+        if role == "manager" or stores:
+            print(f"🔼 Unified Role: Mapping {user_data.email} ({role}) to merchant")
+            role = "merchant"
+        
+        # 5. Token Handling
         token = response.session.access_token
         if role == "admin":
             print(f"👑 Admin login detected ({user_data.email}) - Issuing 30-day token")

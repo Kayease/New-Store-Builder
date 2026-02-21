@@ -1,0 +1,61 @@
+
+[17:28:37] --- Step 2/4: AI Auto-Repairing Source... ---
+
+[17:28:37] --- Step 3/4: Resolving Dependencies... ---
+
+[17:28:38] $ npm install --legacy-peer-deps
+
+added 337 packages, and audited 338 packages in 43s
+
+138 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+[17:29:21] --- Step 4/4: AI-Powered Compilations... ---
+
+[17:29:22] $ npm run build
+
+> nexus-mall@1.0.0 build
+> next build
+
+[33m[1m⚠[22m[39m `eslint` configuration in next.config.js is no longer supported. See more info here: https://nextjs.org/docs/app/api-reference/cli/next#next-lint-options
+[33m[1m⚠[22m[39m Invalid next.config.js options detected: 
+[33m[1m⚠[22m[39m     Unrecognized key(s) in object: 'eslint'
+[33m[1m⚠[22m[39m See more info here: https://nextjs.org/docs/messages/invalid-next-config
+[1m[38;2;173;127;168m▲ Next.js 16.1.6[39m[22m (Turbopack)
+- Environments: .env.local, .env
+- Experiments (use with caution):
+  · cpus: 1
+
+[37m[1m [22m[39m Creating an optimized production build ...
+[32m[1m✓[22m[39m Compiled successfully in 2.6s
+[37m[1m [22m[39m Skipping validation of types
+[37m[1m [22m[39m Collecting page data using 1 worker ...
+[37m[1m [22m[39m Generating static pages using 1 worker (0/14) ...
+[37m[1m [22m[39m Generating static pages using 1 worker (3/14) 
+[37m[1m [22m[39m Generating static pages using 1 worker (6/14) 
+[37m[1m [22m[39m Generating static pages using 1 worker (10/14) 
+[32m[1m✓[22m[39m Generating static pages using 1 worker (14/14) in 515.0ms
+[37m[1m [22m[39m Finalizing page optimization ...
+
+[4mRoute (app)[24m
+┌ ○ /
+├ ○ /_not-found
+├ ○ /about
+├ ○ /blog
+├ ○ /cart
+├ ○ /checkout
+├ ○ /contact
+├ ○ /feedback
+├ ○ /login
+├ ● /product/[id]
+│ ├ /product/p1
+│ └ /product/p2
+├ ○ /products
+└ ○ /signup
+
+
+○  (Static)  prerendered as static content
+●  (SSG)     prerendered as static HTML (uses [36mgenerateStaticParams[39m)
+

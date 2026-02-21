@@ -165,7 +165,10 @@ export default function Page() {
 
   const onUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !buildZip) return;
+    if (!name || !buildZip) {
+      await load();
+      return;
+    }
     setSubmitting(true);
     setUploadProgress(0);
     try {
@@ -183,7 +186,7 @@ export default function Page() {
       setThumbnail(null);
       setBuildZip(null);
       setNewOpen(false);
-      await load();
+      setNewOpen(false);
 
       // Auto-open logs for the new upload
       setTimeout(() => openLogs(uploadedSlug), 500);
@@ -203,6 +206,7 @@ export default function Page() {
     setEditDescription(t.description || "");
     setEditStatus(t.status || "active");
     setEditThumbnail(null);
+    setEditThumbnailPreview(null);
     setEditBuildZip(null);
     setNewOpen(false);
   };
@@ -643,8 +647,9 @@ export default function Page() {
                             {t.status === "active" ? (
                               <Tooltip title="Preview Theme">
                                 <IconButton
-                                  component={Link}
+                                  component="a"
                                   href={`/theme/${t.slug}/preview`}
+                                  target="_blank"
                                   size="small"
                                 >
                                   <Icon name="Eye" size={18} className="text-blue-500" />
